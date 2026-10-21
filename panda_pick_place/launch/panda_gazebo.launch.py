@@ -53,6 +53,24 @@ def make_robot_description(controllers_path):
             f"No Panda URDF or XACRO found in {panda_dir}/urdf"
         )
 
+
+    # Diagnostic: render official collision STL as visual geometry.
+    if os.environ.get("PANDA_DEBUG_STL_VISUALS", "1") == "1":
+        converted = 0
+
+        for link in root.findall("link"):
+            visual = link.find("./visual/geometry/mesh")
+            collision = link.find("./collision/geometry/mesh")
+
+            if visual is not None and collision is not None:
+                uri = collision.get("filename")
+
+                if uri and uri.endswith(".stl"):
+                    visual.set("filename", uri)
+                    converted += 1
+
+        print("[PANDA] Diagnostic STL visuals:", converted)
+
     # Gazebo must constrain the base to the inertial world.
     add_tag(root, "link", name="world")
     fixed = add_tag(root, "joint", name="world_to_panda", type="fixed")

@@ -29,9 +29,9 @@ constexpr double kPickY = 0.0;
 constexpr double kPlaceX = 0.35;
 constexpr double kPlaceY = 0.30;
 constexpr double kBoxSize = 0.05;
-constexpr double kPreZ = 0.22;
-constexpr double kGripZ = 0.10;
-constexpr double kLiftZ = 0.28;
+constexpr double kPreZ = 0.30;
+constexpr double kGripZ = 0.18;
+constexpr double kLiftZ = 0.24;
 constexpr double kPi = 3.14159265358979323846;
 }
 
@@ -52,6 +52,96 @@ public:
   }
 
   bool run() {
+    // Continuous bidirectional Pick-and-Place.
+    // Disable all safety-test stop points for a complete cycle.
+    if (node_->get_parameter("stop_after_pregrasp").as_bool() ||
+        node_->get_parameter("stop_after_grasp").as_bool() ||
+        node_->get_parameter("stop_after_close").as_bool()) {
+      RCLCPP_ERROR(
+          node_->get_logger(),
+          "Continuous mode requires all stop_after_* parameters false");
+      return false;
+    }
+
+    unsigned long leg = 0;
+
+    while (rclcpp::ok()) {
+      const bool forward = (leg % 2 == 0);
+
+      const double pick_x = forward ? kPickX : kPlaceX;
+      const double pick_y = forward ? kPickY : kPlaceY;
+
+      const double place_x = forward ? kPlaceX : kPickX;
+      const double place_y = forward ? kPlaceY : kPickY;
+
+      RCLCPP_INFO(
+          node_->get_logger(),
+          "===== LEG %lu: %s =====",
+          leg + 1, forward ? "A -> B" : "B -> A");
+
+      // Verify the cube is at the next pickup location.
+      geometry_msgs::msg::Pose before;
+      if (!getBoxPose(before)) {
+        RCLCPP_ERROR(node_->get_logger(),
+                     "Cannot query cube before pickup");
+        return false;
+      }
+
+      const double pickup_error = std::hypot(
+          before.position.x - pick_x,
+          before.position.y - pick_y);
+
+      if (pickup_error > 0.015) {
+        RCLCPP_ERROR(
+            node_->get_logger(),
+            "Cube is %.1f mm from expected pickup point. STOP.",
+            pickup_error * 1000.0);
+        return false;
+      }
+
+      // Reuse the existing, successful Pick-and-Place sequence.
+      if (!runOnce(pick_x, pick_y, place_x, place_y)) {
+        RCLCPP_ERROR(
+            node_->get_logger(),
+            "Leg %lu failed. Continuous mode stopped.",
+            leg + 1);
+        return false;
+      }
+
+      // Verify actual Gazebo placement before reversing direction.
+      geometry_msgs::msg::Pose after;
+      if (!getBoxPose(after)) {
+        RCLCPP_ERROR(node_->get_logger(),
+                     "Cannot query cube after placement");
+        return false;
+      }
+
+      const double place_error = std::hypot(
+          after.position.x - place_x,
+          after.position.y - place_y);
+
+      RCLCPP_INFO(
+          node_->get_logger(),
+          "Leg %lu completed, placement error = %.2f mm",
+          leg + 1, place_error * 1000.0);
+
+      if (place_error > 0.015) {
+        RCLCPP_ERROR(
+            node_->get_logger(),
+            "Placement outside 15 mm tolerance. STOP.");
+        return false;
+      }
+
+      ++leg;
+
+      // Allow Gazebo to settle before the next pickup.
+      std::this_thread::sleep_for(std::chrono::milliseconds(800));
+    }
+
+    return true;
+  }
+
+  bool runOnce(double pick_x, double pick_y, double place_x, double place_y) {
     RCLCPP_INFO(node_->get_logger(), "PREFLIGHT: checking robot and Gazebo services");
     if (!gripper_->wait_for_action_server(60s) || !attach_->wait_for_service(60s) ||
         !detach_->wait_for_service(60s) || !model_state_->wait_for_service(60s)) {
@@ -60,27 +150,66 @@ public:
     }
     geometry_msgs::msg::Pose original;
     if (!getBoxPose(original)) return false;
-    if (std::hypot(original.position.x - kPickX, original.position.y - kPickY) > 0.08) {
+    if (std::hypot(original.position.x - pick_x, original.position.y - pick_y) > 0.08) {
       RCLCPP_ERROR(node_->get_logger(), "Cube not at expected pick location");
       return false;
     }
+    if (!scene_.applyCollisionObject(makeWorkSurface())) return false;
     if (!scene_.applyCollisionObject(makeBox(original))) return false;
     if (!openGripper(0.038) || !namedTarget("ready")) return false;
-    if (!moveTo("PRE_GRASP", kPickX, kPickY, kPreZ)) return false;
+    if (!moveTo("PRE_GRASP", pick_x, pick_y, kPreZ)) return false;
+    if (node_->get_parameter("stop_after_pregrasp").as_bool()) {
+      RCLCPP_INFO(node_->get_logger(), "SAFE TEST: stopped after PRE_GRASP");
+      return true;
+    }
 
     // Permit gripper/box contact during the final descent.
     // World collision geometry is restored immediately before attaching.
     auto clear = makeBox(original);
     clear.operation = moveit_msgs::msg::CollisionObject::REMOVE;
     if (!scene_.applyCollisionObject(clear)) return false;
-    if (!moveTo("GRASP", kPickX, kPickY, kGripZ)) {
+    const double grasp_z =
+        node_->get_parameter("grasp_z").as_double();
+
+    if (grasp_z < 0.14 || grasp_z > 0.22) {
+      RCLCPP_ERROR(
+          node_->get_logger(),
+          "Unsafe or unsupported grasp_z: %.3f", grasp_z);
+      return false;
+    }
+
+    if (!moveTo("GRASP", pick_x, pick_y, grasp_z)) {
       scene_.applyCollisionObject(makeBox(original));
       return false;
     }
+    if (node_->get_parameter("stop_after_grasp").as_bool()) {
+      scene_.applyCollisionObject(makeBox(original));
+      RCLCPP_INFO(node_->get_logger(), "SAFE TEST: stopped after GRASP");
+      return true;
+    }
+    geometry_msgs::msg::Pose before_close;
+    if (!getBoxPose(before_close) ||
+        std::hypot(
+            before_close.position.x - original.position.x,
+            before_close.position.y - original.position.y) > 0.01) {
+      RCLCPP_ERROR(
+          node_->get_logger(),
+          "Cube shifted during approach. Aborting grasp.");
+      return false;
+    }
+
     if (!openGripper(0.025)) {
       scene_.applyCollisionObject(makeBox(original));
       return false;
     }
+    if (node_->get_parameter("stop_after_close").as_bool()) {
+      scene_.applyCollisionObject(makeBox(original));
+      RCLCPP_INFO(
+          node_->get_logger(),
+          "SAFE TEST: stopped after gripper closure");
+      return true;
+    }
+
     // Gazebo first, MoveIt second. Do not claim attachment if Gazebo fails.
     if (!physicalAttach()) {
       scene_.applyCollisionObject(makeBox(original));
@@ -99,9 +228,9 @@ public:
       return false;
     }
     RCLCPP_INFO(node_->get_logger(), "ATTACHED in Gazebo and Planning Scene");
-    if (!moveTo("LIFT", kPickX, kPickY, kLiftZ) ||
-        !moveTo("TRANSPORT", kPlaceX, kPlaceY, kLiftZ) ||
-        !moveTo("PLACE", kPlaceX, kPlaceY, kGripZ)) {
+    if (!moveTo("LIFT", pick_x, pick_y, kLiftZ) ||
+        !moveTo("TRANSPORT", place_x, place_y, kLiftZ) ||
+        !moveTo("PLACE", place_x, place_y, grasp_z)) {
       RCLCPP_ERROR(node_->get_logger(), "Transport failed. Cube left attached; stop safely");
       return false;
     }
@@ -119,14 +248,35 @@ public:
     }
     RCLCPP_INFO(node_->get_logger(), "DETACHED: cube pose (%.3f, %.3f, %.3f)",
                 placed.position.x, placed.position.y, placed.position.z);
-    if (!moveTo("RETREAT", kPlaceX, kPlaceY, kPreZ)) return false;
+    if (!moveTo("RETREAT", place_x, place_y, kLiftZ)) return false;
     if (!namedTarget("ready")) return false;
-    const double error = std::hypot(placed.position.x - kPlaceX, placed.position.y - kPlaceY);
+    const double error = std::hypot(placed.position.x - place_x, placed.position.y - place_y);
     RCLCPP_INFO(node_->get_logger(), "COMPLETE; XY placement error = %.1f mm", error * 1000.0);
     return error < 0.075;
   }
 
 private:
+  moveit_msgs::msg::CollisionObject makeWorkSurface() const {
+    moveit_msgs::msg::CollisionObject obj;
+    obj.header.frame_id = "world";
+    obj.id = "work_surface";
+
+    shape_msgs::msg::SolidPrimitive box;
+    box.type = shape_msgs::msg::SolidPrimitive::BOX;
+    box.dimensions = {0.9, 1.0, 0.04};
+
+    geometry_msgs::msg::Pose pose;
+    pose.orientation.w = 1.0;
+    pose.position.x = 0.55;
+    pose.position.y = 0.0;
+    pose.position.z = -0.022;
+
+    obj.primitives.push_back(box);
+    obj.primitive_poses.push_back(pose);
+    obj.operation = moveit_msgs::msg::CollisionObject::ADD;
+    return obj;
+  }
+
   moveit_msgs::msg::CollisionObject makeBox(const geometry_msgs::msg::Pose &pose) const {
     moveit_msgs::msg::CollisionObject obj;
     obj.header.frame_id = "world";
@@ -167,7 +317,76 @@ private:
     return ok;
   }
 
-  bool moveTo(const std::string &stage, double x, double y, double z) {
+  bool cartesianTo(const std::string &stage,
+                   double x, double y, double z) {
+    arm_.setStartStateToCurrentState();
+    arm_.setPoseReferenceFrame("world");
+
+    if (!arm_.setEndEffectorLink("panda_link8")) {
+      RCLCPP_ERROR(node_->get_logger(),
+                   "Invalid end effector link");
+      return false;
+    }
+
+    moveit_msgs::msg::RobotTrajectory trajectory;
+
+    double fraction = arm_.computeCartesianPath(
+        {target(x, y, z)},
+        0.005,
+        2.0,
+        trajectory,
+        true
+    );
+
+    RCLCPP_INFO(node_->get_logger(),
+                "%s Cartesian fraction: %.3f",
+                stage.c_str(), fraction);
+
+    if (fraction < 0.98) {
+      if (stage == "LIFT") {
+        // Diagnostic computation ONLY. Never execute this trajectory.
+        moveit_msgs::msg::RobotTrajectory diagnostic_trajectory;
+
+        const double no_collision_fraction =
+            arm_.computeCartesianPath(
+                {target(x, y, z)},
+                0.005,
+                2.0,
+                diagnostic_trajectory,
+                false);
+
+        RCLCPP_ERROR(
+            node_->get_logger(),
+            "LIFT DIAGNOSTIC: collision_checked=%.3f, "
+            "collision_disabled=%.3f, goal_z=%.3f",
+            fraction, no_collision_fraction, z);
+      }
+
+      RCLCPP_ERROR(node_->get_logger(),
+                   "%s Cartesian path incomplete",
+                   stage.c_str());
+      return false;
+    }
+
+    bool ok = arm_.execute(trajectory) ==
+              moveit::core::MoveItErrorCode::SUCCESS;
+
+    RCLCPP_INFO(node_->get_logger(),
+                "%s Cartesian execution: %s",
+                stage.c_str(), ok ? "OK" : "FAILED");
+    return ok;
+  }
+
+  bool moveTo(const std::string &stage,
+              double x, double y, double z) {
+
+    if (stage == "GRASP" ||
+        stage == "LIFT" ||
+        stage == "PLACE" ||
+        stage == "RETREAT") {
+      return cartesianTo(stage, x, y, z);
+    }
+
     arm_.setStartStateToCurrentState();
     arm_.setPoseReferenceFrame("world");
     if (!arm_.setPoseTarget(target(x, y, z), "panda_link8")) {
@@ -201,7 +420,7 @@ private:
   bool physicalAttach() {
     auto req = std::make_shared<linkattacher_msgs::srv::AttachLink::Request>();
     req->model1_name = "panda";
-    req->link1_name = "panda_hand";
+    req->link1_name = "panda_link7";
     req->model2_name = "pick_box";
     req->link2_name = "box_link";
     auto future = attach_->async_send_request(req);
@@ -214,7 +433,7 @@ private:
   bool physicalDetach() {
     auto req = std::make_shared<linkattacher_msgs::srv::DetachLink::Request>();
     req->model1_name = "panda";
-    req->link1_name = "panda_hand";
+    req->link1_name = "panda_link7";
     req->model2_name = "pick_box";
     req->link2_name = "box_link";
     auto future = detach_->async_send_request(req);
@@ -251,6 +470,10 @@ private:
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   auto node = rclcpp::Node::make_shared("panda_pick_place");
+  node->declare_parameter<bool>("stop_after_pregrasp", true);
+  node->declare_parameter<bool>("stop_after_grasp", true);
+  node->declare_parameter<bool>("stop_after_close", true);
+  node->declare_parameter<double>("grasp_z", 0.18);
   rclcpp::executors::MultiThreadedExecutor executor;
   executor.add_node(node);
   std::thread spinner([&executor] { executor.spin(); });
