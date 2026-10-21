@@ -61,7 +61,7 @@ ros2 control list_controllers
 ros2 action list | grep -E 'follow_joint_trajectory|gripper_cmd'
 ros2 service list | grep -E 'ATTACHLINK|DETACHLINK'
 ros2 topic echo /joint_states --once
-ros2 service call /gazebo/get_model_state gazebo_msgs/srv/GetModelState "{model_name: pick_box, relative_entity_name: world}"
+ros2 service call /gazebo/get_entity_state gazebo_msgs/srv/GetEntityState "{name: pick_box, reference_frame: world}"
 ```
 
 Kỳ vọng controllers `joint_state_broadcaster`, `panda_arm_controller`, `panda_hand_controller` đều `active`; các service `/ATTACHLINK`, `/DETACHLINK` tồn tại; trong Gazebo có model `panda` và `pick_box`.
