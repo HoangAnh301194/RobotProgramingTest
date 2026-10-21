@@ -9,6 +9,10 @@
     <include><uri>model://sun</uri></include>
     <include><uri>model://ground_plane</uri></include>
     <plugin name="gazebo_link_attacher" filename="libgazebo_link_attacher.so"/>
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so">
+      <ros><namespace>/gazebo</namespace></ros>
+      <update_rate>50.0</update_rate>
+    </plugin>
     <model name="pick_box">
       <pose>0.48 0 0.025 0 0 0</pose>
       <link name="box_link">
