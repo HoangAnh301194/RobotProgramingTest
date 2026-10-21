@@ -7,7 +7,7 @@
 #include <vector>
 
 #include <control_msgs/action/gripper_command.hpp>
-#include <gazebo_msgs/srv/get_model_state.hpp>
+#include <gazebo_msgs/srv/get_entity_state.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <linkattacher_msgs/srv/attach_link.hpp>
 #include <linkattacher_msgs/srv/detach_link.hpp>
@@ -42,7 +42,7 @@ public:
         gripper_(rclcpp_action::create_client<Gripper>(node_, "/panda_hand_controller/gripper_cmd")),
         attach_(node_->create_client<linkattacher_msgs::srv::AttachLink>("/ATTACHLINK")),
         detach_(node_->create_client<linkattacher_msgs::srv::DetachLink>("/DETACHLINK")),
-        model_state_(node_->create_client<gazebo_msgs::srv::GetModelState>("/gazebo/get_model_state")) {
+        model_state_(node_->create_client<gazebo_msgs::srv::GetEntityState>("/gazebo/get_entity_state")) {
     arm_.setPlannerId("RRTConnectkConfigDefault");
     arm_.setPlanningTime(20.0);
     arm_.setNumPlanningAttempts(8);
@@ -225,17 +225,17 @@ private:
   }
 
   bool getBoxPose(geometry_msgs::msg::Pose &pose) {
-    auto req = std::make_shared<gazebo_msgs::srv::GetModelState::Request>();
-    req->model_name = "pick_box";
-    req->relative_entity_name = "world";
+    auto req = std::make_shared<gazebo_msgs::srv::GetEntityState::Request>();
+    req->name = "pick_box";
+    req->reference_frame = "world";
     auto future = model_state_->async_send_request(req);
     if (future.wait_for(10s) != std::future_status::ready) return false;
     auto resp = future.get();
     if (!resp->success) {
-      RCLCPP_ERROR(node_->get_logger(), "Gazebo GetModelState: %s", resp->status_message.c_str());
+      RCLCPP_ERROR(node_->get_logger(), "Gazebo GetModelState: %s", "entity query unsuccessful");
       return false;
     }
-    pose = resp->pose;
+    pose = resp->state.pose;
     return true;
   }
 
@@ -245,7 +245,7 @@ private:
   rclcpp_action::Client<Gripper>::SharedPtr gripper_;
   rclcpp::Client<linkattacher_msgs::srv::AttachLink>::SharedPtr attach_;
   rclcpp::Client<linkattacher_msgs::srv::DetachLink>::SharedPtr detach_;
-  rclcpp::Client<gazebo_msgs::srv::GetModelState>::SharedPtr model_state_;
+  rclcpp::Client<gazebo_msgs::srv::GetEntityState>::SharedPtr model_state_;
 };
 
 int main(int argc, char **argv) {
