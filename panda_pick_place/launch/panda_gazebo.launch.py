@@ -26,10 +26,32 @@ def add_tag(parent, tag, value=None, **attrs):
 
 
 def make_robot_description(controllers_path):
-    panda_dir = get_package_share_directory("moveit_resources_panda_description")
-    panda_xacro = os.path.join(panda_dir, "urdf", "panda.urdf.xacro")
-    # Upstream Panda is used unchanged; only expand its xacro here.
-    root = ET.fromstring(xacro.process_file(panda_xacro).toxml())
+    panda_dir = get_package_share_directory(
+    "moveit_resources_panda_description"
+    )
+
+    panda_xacro = os.path.join(
+        panda_dir, "urdf", "panda.urdf.xacro"
+    )
+
+    panda_urdf = os.path.join(
+        panda_dir, "urdf", "panda.urdf"
+    )
+
+    if os.path.isfile(panda_xacro):
+        print("[PANDA] Using XACRO:", panda_xacro)
+        root = ET.fromstring(
+            xacro.process_file(panda_xacro).toxml()
+        )
+
+    elif os.path.isfile(panda_urdf):
+        print("[PANDA] Using URDF:", panda_urdf)
+        root = ET.parse(panda_urdf).getroot()
+
+    else:
+        raise FileNotFoundError(
+            f"No Panda URDF or XACRO found in {panda_dir}/urdf"
+        )
 
     # Gazebo must constrain the base to the inertial world.
     add_tag(root, "link", name="world")
@@ -40,10 +62,30 @@ def make_robot_description(controllers_path):
     control = add_tag(root, "ros2_control", name="PandaGazeboSystem", type="system")
     hardware = add_tag(control, "hardware")
     add_tag(hardware, "plugin", "gazebo_ros2_control/GazeboSystem")
+    # Initial Panda configuration: MoveIt SRDF "ready"
+    initial_positions = {
+        "panda_joint1": 0.0,
+        "panda_joint2": -0.785,
+        "panda_joint3": 0.0,
+        "panda_joint4": -2.356,
+        "panda_joint5": 0.0,
+        "panda_joint6": 1.571,
+        "panda_joint7": 0.785,
+        "panda_finger_joint1": 0.035,
+    }
+
     for joint_name in [f"panda_joint{i}" for i in range(1, 8)] + ["panda_finger_joint1"]:
         joint = add_tag(control, "joint", name=joint_name)
         add_tag(joint, "command_interface", name="position")
-        add_tag(joint, "state_interface", name="position")
+        position_state = add_tag(
+            joint, "state_interface", name="position"
+        )
+        add_tag(
+            position_state,
+            "param",
+            str(initial_positions[joint_name]),
+            name="initial_value",
+        )
         add_tag(joint, "state_interface", name="velocity")
     # The second gripper finger is mechanically coupled to the first.
     finger2 = add_tag(control, "joint", name="panda_finger_joint2")

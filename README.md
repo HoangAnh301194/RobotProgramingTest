@@ -3,7 +3,6 @@
 **Sinh viên:** Nguyễn Hữu Hoàng Anh — **Mã SV:** B23DCDK007  
 **Đề:** Xây dựng hệ thống Pick-and-Place trong Gazebo; sử dụng MoveIt 2 lập kế hoạch tiếp cận, gắp, vận chuyển; đồng bộ attach/detach với Planning Scene và Gazebo.
 
-## Quyết định thiết kế
 
 - **Dùng trực tiếp mô hình Panda do MoveIt cung cấp** (`moveit_resources_panda_description` và SRDF/config của `moveit_resources_panda_moveit_config`). Không viết lại URDF hoặc sửa mesh/khớp của robot.
 - ROS 2 **Humble** + Ubuntu **22.04** + **Gazebo Classic 11** (chọn để tương thích IFRA LinkAttacher, plugin fixed-joint ROS 2 đã có cho Humble).
