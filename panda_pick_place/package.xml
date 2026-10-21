@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>panda_pick_place</name>
+  <version>0.1.0</version>
+  <description>Franka Panda MoveIt 2 / Gazebo Classic synchronized pick-and-place test</description>
+  <maintainer email="student@example.invalid">Nguyen Huu Hoang Anh</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>moveit_ros_planning_interface</depend>
+  <depend>moveit_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>shape_msgs</depend>
+  <depend>control_msgs</depend>
+  <depend>gazebo_msgs</depend>
+  <depend>linkattacher_msgs</depend>
+  <exec_depend>moveit_configs_utils</exec_depend>
+  <exec_depend>moveit_resources_panda_description</exec_depend>
+  <exec_depend>moveit_resources_panda_moveit_config</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>gazebo_ros2_control</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
