@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <world name="default">
+    <gravity>0 0 -9.81</gravity>
+    <physics name="ode" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+    <plugin name="gazebo_link_attacher" filename="libgazebo_link_attacher.so"/>
+    <model name="pick_box">
+      <pose>0.48 0 0.025 0 0 0</pose>
+      <link name="box_link">
+        <inertial>
+          <mass>0.08</mass>
+          <inertia>
+            <ixx>0.0000333</ixx><iyy>0.0000333</iyy><izz>0.0000333</izz>
+            <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+          <surface><friction><ode><mu>2</mu><mu2>2</mu2></ode></friction></surface>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+          <material><ambient>0.9 0.1 0.1 1</ambient><diffuse>0.9 0.1 0.1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="target_marker">
+      <static>true</static>
+      <pose>0.35 0.30 0.002 0 0 0</pose>
+      <link name="marker_link">
+        <visual name="marker">
+          <geometry><box><size>0.10 0.10 0.002</size></box></geometry>
+          <material><ambient>0.1 0.8 0.1 1</ambient><diffuse>0.1 0.8 0.1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>
